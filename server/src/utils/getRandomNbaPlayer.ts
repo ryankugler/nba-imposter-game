@@ -19,6 +19,14 @@ const NBA_PLAYERS = [
  * Picks a random NBA player from the player pool.
  */
 export function getRandomNbaPlayer(): string {
+  if (NBA_PLAYERS.length === 0) {
+    throw new Error("NBA_PLAYERS list is empty");
+  }
+
   const index = Math.floor(Math.random() * NBA_PLAYERS.length);
-  return NBA_PLAYERS[index];
+  const player = NBA_PLAYERS[index];
+  if (player === undefined) {
+    throw new Error("Failed to select an NBA player");
+  }
+  return player;
 }
