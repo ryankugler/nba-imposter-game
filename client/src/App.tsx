@@ -23,6 +23,8 @@ type RoleAssignment =
   | { role: "imposter" }
   | { role: "player"; nbaPlayer: string };
 
+type GamePhase = "voting" | "waiting" | "roles" | "results";
+
 function App() {
   // ----- Local UI state -----
 
@@ -55,6 +57,10 @@ function App() {
     null
   );
 
+  // Tracks the current phase of the game for this lobby.
+  // We start with null because we haven't joined/created a lobby yet.
+ const [phase, setPhase] = useState<GamePhase | null>(null);
+
   // ----- Socket event handlers -----
   useEffect(() => {
     // Handle "lobbyCreated" event:
@@ -79,6 +85,8 @@ function App() {
 
       // Switch the UI from the home screen to the lobby view.
       setView("lobby");
+
+      setPhase("waiting");
 
       // Clear any previous error messages.
       setErrorMessage(null);
@@ -106,6 +114,8 @@ function App() {
 
       // Move to the lobby view.
       setView("lobby");
+
+      setPhase("waiting");
 
       // Clear any error messages on successful join.
       setErrorMessage(null);
@@ -144,13 +154,31 @@ function App() {
       // Switch view to the role screen so the user can see their role.
       setView("role");
 
+      setPhase("roles");
+
       // Clear any old errors.
       setErrorMessage(null);
     });
 
     // OPTIONAL: listen for "phaseUpdated" if you want to inspect phase changes.
-    socket.on("phaseUpdated", (payload: { phase: string }) => {
+    socket.on("phaseUpdated", (payload: { phase: GamePhase }) => {
+      setPhase(payload.phase);
       console.log("Phase updated:", payload.phase);
+
+      // We can also switch views based on the phase.
+      // - When phase becomes "voting", show the voting screen (later).
+      // - When phase becomes "results", show results screen (later).
+      //
+      // For now, let's just prepare the logic and we'll build
+      // the actual Voting/Results UI in the next steps.
+      if (payload.phase === "voting") {
+        // We will create this view soon.
+        // For now, we stay on whatever view we're on.
+        // setView("voting");
+      } else if (payload.phase === "results") {
+        // Similarly, results view comes later.
+        // setView("results");
+      }
     });
 
     // Cleanup function:
@@ -221,6 +249,22 @@ function App() {
     setView("lobby");
   };
 
+  const handleStartVoting = () => {
+
+    if (!lobbyCode){
+      setErrorMessage("Lobby code missing, cannot start voting!");
+      return;
+    }
+
+    // Emit "startVoting" to the server.
+    // The server will:
+    //  - validate that we are the host
+    //  - ensure there's an active round
+    //  - set phase to "voting"
+    //  - emit "phaseUpdated" to everyone
+    socket.emit("startVoting", {lobbyCode});
+  }
+
   // ----- Render helpers: Different views -----
 
   // Render the "Home" view where the user can create or join a lobby.
@@ -274,6 +318,13 @@ function App() {
     <div style={styles.container}>
       <h1>Lobby</h1>
 
+      {/* Show current phase for debugging/understanding. */}
+      <p>
+        Current phase:{" "}
+        <strong>{phase ?? "unknown"}</strong>
+      </p>
+
+
       {/* Display the lobby code so players can share it. */}
       {lobbyCode && (
         <p>
@@ -315,6 +366,23 @@ function App() {
         </div>
       )}
 
+ {/* TODO: Make start voting button be available after the game has been started rather than have to go back to the lobby to initiate the voting */}
+      {/* Show "Start Voting" for host only when in roles phase.
+          This implies:
+          - The game has started
+          - Roles have been assigned
+          - Players have presumably given their clues in person
+      */}
+      {yourPlayerId &&
+        hostId === yourPlayerId &&
+        phase === "roles" && (
+          <div style={{ marginTop: "1rem" }}>
+            <button style={styles.buttonSecondary} onClick={handleStartVoting}>
+              Start Voting
+            </button>
+          </div>
+        )}
+
       {errorMessage && <p style={styles.error}>{errorMessage}</p>}
     </div>
   );
@@ -324,6 +392,12 @@ function App() {
   const renderRoleView = () => (
     <div style={styles.container}>
       <h1>Your Role</h1>
+
+      {/* Show phase here too so you can see when it moves to "voting". */}
+      <p>
+        Current phase:{" "}
+        <strong>{phase ?? "unknown"}</strong>
+      </p> 
 
       <div style={styles.card}>
         {/* If we haven't received a roleAssignment yet, inform the user. */}

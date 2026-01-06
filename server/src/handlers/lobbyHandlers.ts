@@ -21,6 +21,36 @@ export const lobbies = new Map<string, Lobby>();
 const MAX_PLAYERS = 10;
 
 /**
+ * Normalize a lobby code from the payload and fetch the lobby.
+ * Emits an error and returns undefined when validation fails.
+ */
+function resolveLobbyFromPayload(
+  socket: Socket,
+  payload: { lobbyCode?: string },
+  messages?: { missingLobbyCode?: string; notFound?: string }
+): { lobbyCode: string; lobby: Lobby } | undefined {
+  const lobbyCode = payload?.lobbyCode?.trim().toUpperCase();
+
+  if (!lobbyCode) {
+    socket.emit("errorMessage", {
+      message: messages?.missingLobbyCode ?? "Lobby code is required.",
+    });
+    return;
+  }
+
+  const lobby = lobbies.get(lobbyCode);
+
+  if (!lobby) {
+    socket.emit("errorMessage", {
+      message: messages?.notFound ?? "Lobby not found.",
+    });
+    return;
+  }
+
+  return { lobbyCode, lobby };
+}
+
+/**
  * Registers all lobby-related event listeners for a given socket.
  * 
  * @param io - The Socket.IO server instance (used for broadcasting)
@@ -86,22 +116,25 @@ export function registerLobbyHandlers(io: Server, socket: Socket) {
   socket.on(
     "joinLobby",
     (payload: { lobbyCode: string; nickname: string }) => {
-      const lobbyCode = payload?.lobbyCode?.trim().toUpperCase();
       const nickname = payload?.nickname?.trim();
 
-      if (!lobbyCode || !nickname) {
+      if (!nickname) {
         socket.emit("errorMessage", {
           message: "Lobby code and nickname are required.",
         });
         return;
       }
 
-      const lobby = lobbies.get(lobbyCode);
+      const lobbyLookup = resolveLobbyFromPayload(socket, payload, {
+        missingLobbyCode: "Lobby code and nickname are required.",
+      });
 
-      if (!lobby) {
-        socket.emit("errorMessage", { message: "Lobby not found." });
+      if (!lobbyLookup) {
         return;
       }
+
+      const { lobby, lobbyCode } = lobbyLookup;
+
 
       if (lobby.players.length >= MAX_PLAYERS) {
         socket.emit("errorMessage", { message: "Lobby is full." });
@@ -138,19 +171,13 @@ export function registerLobbyHandlers(io: Server, socket: Socket) {
    * Client payload: { lobbyCode: string }
    */
   socket.on("startGame", (payload: { lobbyCode: string }) => {
-    const lobbyCode = payload?.lobbyCode?.trim().toUpperCase();
+    const lobbyLookup = resolveLobbyFromPayload(socket, payload);
 
-    if (!lobbyCode) {
-      socket.emit("errorMessage", { message: "Lobby code is required." });
+    if (!lobbyLookup) {
       return;
     }
 
-    const lobby = lobbies.get(lobbyCode);
-
-    if (!lobby) {
-      socket.emit("errorMessage", { message: "Lobby not found." });
-      return;
-    }
+    const { lobby, lobbyCode } = lobbyLookup;
 
     if (socket.id !== lobby.hostId) {
       socket.emit("errorMessage", {
@@ -202,54 +229,14 @@ export function registerLobbyHandlers(io: Server, socket: Socket) {
   });
 
   socket.on("startVoting", (payload: { lobbyCode: string }) => {
-  /**
-   * EVENT: startVoting
-   * -------------------
-   * Called by the host when they want to begin the voting phase
-   * after players have given their verbal clues in person.
-   *
-   * Payload: { lobbyCode: string }
-   */
-    const lobbyCode = payload?.lobbyCode?.trim().toUpperCase();
-
-    if (!lobbyCode) {
-        socket.emit("errorMessage", { message: "Lobby code is required." });
-        return;
-    }
-
-    const lobby = lobbies.get(lobbyCode);
-
-    if (!lobby) {
-        socket.emit("errorMessage", { message: "Lobby not found." });
-        return;
-    }
-
-    // Inside registerLobbyHandlers(io, socket) in lobbyHandlers.ts
-
-  /**
-   * EVENT: startVoting
-   * -------------------
-   * Called by the host when they want to begin the voting phase
-   * after players have given their verbal clues in person.
-   *
-   * Payload: { lobbyCode: string }
-   */
-  socket.on("startVoting", (payload: { lobbyCode: string }) => {
     // Normalize + validate lobby code.
-    const lobbyCode = payload?.lobbyCode?.trim().toUpperCase();
+    const lobbyLookup = resolveLobbyFromPayload(socket, payload);
 
-    if (!lobbyCode) {
-      socket.emit("errorMessage", { message: "Lobby code is required." });
+    if (!lobbyLookup) {
       return;
     }
 
-    // Find the lobby in our in-memory store.
-    const lobby = lobbies.get(lobbyCode);
-
-    if (!lobby) {
-      socket.emit("errorMessage", { message: "Lobby not found." });
-      return;
-    }
+    const { lobby, lobbyCode } = lobbyLookup;
 
     // Only the host can start the voting phase.
     if (socket.id !== lobby.hostId) {
@@ -290,10 +277,9 @@ export function registerLobbyHandlers(io: Server, socket: Socket) {
     "submitVote",
     (payload: { lobbyCode: string; votedPlayerId: string }) => {
       // Extract and normalize the lobby code from the payload.
-      const lobbyCode = payload?.lobbyCode?.trim().toUpperCase();
       const votedPlayerId = payload?.votedPlayerId?.trim();
 
-      if (!lobbyCode || !votedPlayerId) {
+      if (!votedPlayerId) {
         socket.emit("errorMessage", {
           message: "Lobby code and voted player are required.",
         });
@@ -301,12 +287,15 @@ export function registerLobbyHandlers(io: Server, socket: Socket) {
       }
 
       // Look up the lobby.
-      const lobby = lobbies.get(lobbyCode);
+      const lobbyLookup = resolveLobbyFromPayload(socket, payload, {
+        missingLobbyCode: "Lobby code and voted player are required.",
+      });
 
-      if (!lobby) {
-        socket.emit("errorMessage", { message: "Lobby not found." });
+      if (!lobbyLookup) {
         return;
       }
+
+      const { lobby, lobbyCode } = lobbyLookup;
 
       // Voting only makes sense during the "voting" phase.
       if (lobby.phase !== "voting") {
@@ -409,6 +398,4 @@ export function registerLobbyHandlers(io: Server, socket: Socket) {
       }
     }
   );
-  });
-
 }
